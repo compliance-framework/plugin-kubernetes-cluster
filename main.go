@@ -109,10 +109,7 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 	// ACTIVITY: kubeletConfig
 	nodeName := os.Getenv("NODE_NAME")
 	kubeletConfigApiPath := fmt.Sprintf("/api/v1/nodes/%s/proxy/configz", nodeName)
-	nodeInfo, err := clientset.RESTClient().
-		Get().
-		RequestURI(kubeletConfigApiPath).
-		DoRaw(context.TODO())
+	nodeInfo, err := clientset.RESTClient().Get().RequestURI(kubeletConfigApiPath).DoRaw(context.TODO())
 	if err != nil {
 		l.logger.Error("unable to get nodeInfo", "error", err)
 		errAcc = errors.Join(errAcc, err)
@@ -145,10 +142,7 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 
 	// ACTIVITY: auditLogs being sent
 	statsSummaryApiPath := fmt.Sprintf("/api/v1/nodes/%s/proxy/stats/summary", nodeName)
-	statsSummary, err := clientset.RESTClient().
-		Get().
-		RequestURI(statsSummaryApiPath).
-		DoRaw(context.TODO())
+	statsSummary, err := clientset.RESTClient().Get().RequestURI(statsSummaryApiPath).DoRaw(context.TODO())
 	if err != nil {
 		l.logger.Error("unable to get statsSummary", "error", err)
 		errAcc = errors.Join(errAcc, err)
