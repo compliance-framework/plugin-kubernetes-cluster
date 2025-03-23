@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	policyManager "github.com/compliance-framework/agent/policy-manager"
@@ -63,7 +62,6 @@ func (l *CompliancePlugin) Eval(request *proto.EvalRequest, apiHelper runner.Api
 
 func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.EvalRequest) ([]*proto.Observation, []*proto.Finding, error) {
 	startTime := time.Now()
-	clusterName := os.Getenv("CLUSTER_NAME")
 	var errAcc error
 
 	activities := make([]*proto.Activity, 0)
@@ -244,7 +242,7 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 					Collected: timestamppb.New(time.Now()),
 					Labels: map[string]string{
 						"type":         "k8s-native",
-						"host":         clusterName,
+						"host":         "CCF cluster",
 						"_policy":      result.Policy.Package.PurePackage(),
 						"_policy_path": result.Policy.File,
 					},
