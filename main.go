@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	policyManager "github.com/compliance-framework/agent/policy-manager"
@@ -84,6 +86,7 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 
 	clusterData := make(map[string]interface{})
 
+	// ACTIVITY: cluster RBAC
 	_, err = clientset.RbacV1().ClusterRoles().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		l.logger.Info("RBAC not enabled", err)
@@ -92,8 +95,6 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 		l.logger.Info("RBAC enabled", err)
 		clusterData["RBACEnabled"] = true
 	}
-
-	// ACTIVITY: cluster configuration call
 	clusterConfigSteps := make([]*proto.Step, 0)
 	clusterConfigSteps = append(clusterConfigSteps, &proto.Step{
 		Title:       "Fetch cluster configuration from all namespaces",
@@ -105,8 +106,84 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 		Steps:       clusterConfigSteps,
 	})
 
-	l.logger.Debug("evaluating clusterData data", clusterData)
+	// ACTIVITY: kubeletConfig
+	nodeName := os.Getenv("NODE_NAME")
+	kubeletConfigApiPath := fmt.Sprintf("/api/v1/nodes/%s/proxy/configz", nodeName)
+	nodeInfo, err := clientset.RESTClient().
+		Get().
+		RequestURI(kubeletConfigApiPath).
+		DoRaw(context.TODO())
+	if err != nil {
+		l.logger.Error("unable to get nodeInfo", "error", err)
+		errAcc = errors.Join(errAcc, err)
+		return observations, findings, errAcc
+	}
+	var nodeInfoRes map[string]interface{}
+	if err := json.Unmarshal(nodeInfo, &nodeInfoRes); err != nil {
+		l.logger.Error("error unmarshaling response", "error", err)
+		errAcc = errors.Join(errAcc, err)
+		return observations, findings, errAcc
+	}
+	kubeletConfigSteps := make([]*proto.Step, 0)
+	kubeletConfigSteps = append(kubeletConfigSteps, &proto.Step{
+		Title:       "Fetched node proxy config",
+		Description: "Fetched node proxy config using internal k8s API.",
+	})
+	if kubeletConfig, exists := nodeInfoRes["kubeletConfig"].(map[string]interface{}); exists {
+		clusterData["kubeletConfig"] = kubeletConfig
+		kubeletConfigSteps = append(kubeletConfigSteps, &proto.Step{
+			Title:       "Fetched kubeletConfig",
+			Description: "Fetched kubeletConfig using internal k8s API.",
+		})
 
+	}
+	activities = append(activities, &proto.Activity{
+		Title:       "Collected node proxy config configuration",
+		Description: "Collected node proxy config configuration and prepare collected data for validation in policy engine",
+		Steps:       kubeletConfigSteps,
+	})
+
+	// ACTIVITY: auditLogs being sent
+	statsSummaryApiPath := fmt.Sprintf("/api/v1/nodes/%s/proxy/stats/summary", nodeName)
+	statsSummary, err := clientset.RESTClient().
+		Get().
+		RequestURI(statsSummaryApiPath).
+		DoRaw(context.TODO())
+	if err != nil {
+		l.logger.Error("unable to get statsSummary", "error", err)
+		errAcc = errors.Join(errAcc, err)
+		return observations, findings, errAcc
+	}
+	var statsSummaryRes map[string]interface{}
+	if err := json.Unmarshal(statsSummary, &statsSummaryRes); err != nil {
+		l.logger.Error("error unmarshaling statsSummaryRes response", "error", err)
+		errAcc = errors.Join(errAcc, err)
+		return observations, findings, errAcc
+	}
+	auditLogsSteps := make([]*proto.Step, 0)
+	auditLogsSteps = append(auditLogsSteps, &proto.Step{
+		Title:       "Fetched statsSummaryRes config",
+		Description: "Fetched statsSummaryRes config using internal k8s API.",
+	})
+	if auditLogs, exists := statsSummaryRes["auditLogs"].(map[string]interface{}); exists {
+		clusterData["auditLogs"] = auditLogs
+		auditLogsSteps = append(auditLogsSteps, &proto.Step{
+			Title:       "Fetched auditLogs",
+			Description: "Fetched auditLogs using internal k8s API.",
+		})
+	} else {
+		auditLogsSteps = append(auditLogsSteps, &proto.Step{
+			Title:       "Failed to fetch auditLogs",
+			Description: "Failed to fetch auditLogs using internal k8s API.",
+		})
+	}
+	activities = append(activities, &proto.Activity{
+		Title:       "Finsihed parsing statsSummaryRes",
+		Description: "Finished parsing statsSummaryRes",
+		Steps:       auditLogsSteps,
+	})
+
+	l.logger.Debug("evaluating clusterData data", clusterData)
 	for _, policyPath := range request.GetPolicyPaths() {
 		actors := []*proto.OriginActor{
 			{
@@ -135,8 +212,6 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 			},
 		}
 
-		// Pods
-
 		components := []*proto.ComponentReference{
 			{
 				Identifier: "common-components/kubernetes-cluster",
@@ -144,7 +219,7 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 		}
 		subjectAttributeMap := map[string]string{
 			"type":         "k8s-native-cluster",
-			"cluster_name": fmt.Sprintf("%v", clusterData),
+			"cluster_info": fmt.Sprintf("%v", clusterData),
 		}
 
 		subjects := []*proto.SubjectReference{
@@ -156,8 +231,8 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 				Props: []*proto.Property{
 					{
 						Name:    "cluster",
-						Value:   "TODO: name of the cluster here",
-						Remarks: internal.StringAddressed("The pod of which the policy was executed against"),
+						Value:   "CCF",
+						Remarks: internal.StringAddressed("The cluster of which the policy was executed against"),
 					},
 				},
 			},
