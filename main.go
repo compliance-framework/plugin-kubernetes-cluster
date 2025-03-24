@@ -108,25 +108,36 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 
 	// ACTIVITY: kubeletConfig
 	nodeName := os.Getenv("NODE_NAME")
-	kubeletConfigApiPath := fmt.Sprintf("/api/v1/nodes/%s/proxy/configz", nodeName)
-	nodeInfo, err := clientset.RESTClient().Get().RequestURI(kubeletConfigApiPath).DoRaw(context.TODO())
+	if nodeName == "" {
+		l.logger.Error("NODE_NAME is not set! Make sure it's correctly passed to the container.")
+		errAcc = errors.Join(errAcc, fmt.Errorf("NODE_NAME environment variable is not set"))
+		return observations, findings, errAcc
+	}
+	kubeletConfigApiPath := fmt.Sprintf("nodes/%s/proxy/configz", nodeName)
+	l.logger.Info("Fetching node config from:", "path", kubeletConfigApiPath)
+	nodeInfo, err := clientset.RESTClient().
+		Get().
+		RequestURI(fmt.Sprintf("/api/v1/nodes/%s/proxy/configz", nodeName)).
+		Do(context.TODO()).Raw()
 	if err != nil {
-		l.logger.Error("unable to get nodeInfo", "error", err)
+		l.logger.Error("Unable to get nodeInfo", "error", err.Error())
 		errAcc = errors.Join(errAcc, err)
 		return observations, findings, errAcc
 	}
-	var nodeInfoRes map[string]interface{}
-	if err := json.Unmarshal(nodeInfo, &nodeInfoRes); err != nil {
-		l.logger.Error("error unmarshaling response", "error", err)
+	// Attempt to unmarshal into a map if it's JSON
+	var nodeInfoMap map[string]interface{}
+	if err := json.Unmarshal(nodeInfo, &nodeInfoMap); err != nil {
+		l.logger.Error("Unable to unmarshal nodeInfo", "error", err.Error())
 		errAcc = errors.Join(errAcc, err)
 		return observations, findings, errAcc
 	}
+	l.logger.Info("Unmarshalled node info", "nodeInfo", nodeInfoMap)
 	kubeletConfigSteps := make([]*proto.Step, 0)
 	kubeletConfigSteps = append(kubeletConfigSteps, &proto.Step{
 		Title:       "Fetched node proxy config",
 		Description: "Fetched node proxy config using internal k8s API.",
 	})
-	if kubeletConfig, exists := nodeInfoRes["kubeletConfig"].(map[string]interface{}); exists {
+	if kubeletConfig, exists := nodeInfoMap["kubeletconfig"].(map[string]interface{}); exists {
 		clusterData["kubeletConfig"] = kubeletConfig
 		kubeletConfigSteps = append(kubeletConfigSteps, &proto.Step{
 			Title:       "Fetched kubeletConfig",
@@ -140,43 +151,37 @@ func (l *CompliancePlugin) EvaluatePolicies(ctx context.Context, request *proto.
 		Steps:       kubeletConfigSteps,
 	})
 
-	// ACTIVITY: auditLogs being sent
+	// ACTIVITY: statsSummary
 	statsSummaryApiPath := fmt.Sprintf("/api/v1/nodes/%s/proxy/stats/summary", nodeName)
-	statsSummary, err := clientset.RESTClient().Get().RequestURI(statsSummaryApiPath).DoRaw(context.TODO())
+	statsSummary, err := clientset.RESTClient().
+		Get().
+		RequestURI(statsSummaryApiPath).
+		DoRaw(context.TODO())
 	if err != nil {
-		l.logger.Error("unable to get statsSummary", "error", err)
+		l.logger.Error("Unable to get statsSummary", "error", err.Error())
 		errAcc = errors.Join(errAcc, err)
 		return observations, findings, errAcc
 	}
 	var statsSummaryRes map[string]interface{}
 	if err := json.Unmarshal(statsSummary, &statsSummaryRes); err != nil {
-		l.logger.Error("error unmarshaling statsSummaryRes response", "error", err)
+		l.logger.Error("error unmarshaling statsSummaryRes response", "error", err.Error())
 		errAcc = errors.Join(errAcc, err)
 		return observations, findings, errAcc
 	}
+	l.logger.Info("Unmarshalled statsSummaryRes", "statsSummary", statsSummaryRes)
 	auditLogsSteps := make([]*proto.Step, 0)
 	auditLogsSteps = append(auditLogsSteps, &proto.Step{
 		Title:       "Fetched statsSummaryRes config",
 		Description: "Fetched statsSummaryRes config using internal k8s API.",
 	})
-	if auditLogs, exists := statsSummaryRes["auditLogs"].(map[string]interface{}); exists {
-		clusterData["auditLogs"] = auditLogs
-		auditLogsSteps = append(auditLogsSteps, &proto.Step{
-			Title:       "Fetched auditLogs",
-			Description: "Fetched auditLogs using internal k8s API.",
-		})
-	} else {
-		auditLogsSteps = append(auditLogsSteps, &proto.Step{
-			Title:       "Failed to fetch auditLogs",
-			Description: "Failed to fetch auditLogs using internal k8s API.",
-		})
-	}
+	clusterData["statsSummary"] = statsSummaryRes
 	activities = append(activities, &proto.Activity{
 		Title:       "Finsihed parsing statsSummaryRes",
 		Description: "Finished parsing statsSummaryRes",
 		Steps:       auditLogsSteps,
 	})
 
+	// Acvitity: Eval
 	l.logger.Debug("evaluating clusterData data", clusterData)
 	for _, policyPath := range request.GetPolicyPaths() {
 		actors := []*proto.OriginActor{
