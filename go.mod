@@ -3,8 +3,8 @@ module github.com/compliance-framework/plugin-kubernetes-cluster
 go 1.23.2
 
 require (
-	github.com/compliance-framework/agent v0.1.1
-	github.com/compliance-framework/configuration-service v0.1.1
+	github.com/compliance-framework/agent v0.1.5
+	github.com/compliance-framework/configuration-service v0.1.3
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.5.0
 	github.com/hashicorp/go-plugin v1.6.2
